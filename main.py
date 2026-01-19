@@ -1,24 +1,29 @@
 from vision.tracker import VisionTracker
 from render.scenemanager import SceneManager
-from ursina import update
+import ursina
 
-def main():
-    tracker = VisionTracker()
-    scene = SceneManager()
+# Initialize these as None; they'll be set in main()
+tracker = None
+scene = None
 
-    # Define the update function for Ursina
-    def update():
+def update():
+    # Ursina automatically looks for a global 'update' function in the main script
+    if tracker and scene:
         coords = tracker.get_eye_midpoint()
         if coords:
-            # We add a bit of smoothing or scaling here if needed
             scene.update_camera(coords[0], coords[1], coords[2])
 
-    # Assign the update function to Ursina's global update
-    import ursina
-    ursina.update = update
-
+def main():
+    global tracker, scene
+    tracker = VisionTracker()
+    scene = SceneManager()
+    
+    # We don't need to manually assign ursina.update if it's defined globally here
     scene.run()
     tracker.release()
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
