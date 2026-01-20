@@ -1,4 +1,4 @@
 opencv-python
 mediapipe
 ursina
-numpy
+numpy<2

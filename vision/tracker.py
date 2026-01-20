@@ -1,65 +1,67 @@
 import cv2
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 import numpy as np
+import os
 
 class VisionTracker:
     def __init__(self):
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+        # Path to the model file
+        model_path = os.path.join(os.getcwd(), 'face_landmarker.task')
+        
+        # Configure Landmarker
+        base_options = python.BaseOptions(model_asset_path=model_path)
+        options = vision.FaceLandmarkerOptions(
+            base_options=base_options,
+            output_face_blendshapes=True,
+            output_facial_transformation_matrixes=True,
+            num_faces=1
         )
+        self.detector = vision.FaceLandmarker.create_from_options(options)
+        
         self.cap = cv2.VideoCapture(0)
         self.coords = (0, 0, 0) # x, y, z
 
     def get_eye_midpoint(self):
         success, image = self.cap.read()
         if not success:
-            return None
+            return None, None
         
-        # Flip the image horizontally for a later selfie-view display
-        # Convert the BGR image to RGB
-        image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
+        # Image needs to be RGB and a MediaPipe Image object for detection
+        image_flipped = cv2.flip(image, 1)
+        image_rgb = cv2.cvtColor(image_flipped, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
         
-        # To improve performance, optionally mark the image as not writeable to
-        # pass by reference.
-        image.flags.writeable = False
-        results = self.face_mesh.process(image)
+        # Detect landmarks
+        detection_result = self.detector.detect(mp_image)
         
-        if results.multi_face_landmarks:
-            face_landmarks = results.multi_face_landmarks[0]
-            
-            # Landmark 168 is the bridge of the nose, between the eyes.
-            # It's a stable point for head tracking.
-            nose_bridge = face_landmarks.landmark[168]
+        viz_image = image_flipped.copy()
+        
+        if detection_result.face_landmarks:
+            face_landmarks = detection_result.face_landmarks[0]
+            nose_bridge = face_landmarks[168]
             
             # Normalize coordinates to [-1, 1]
             x = (nose_bridge.x - 0.5) * 2
-            y = (nose_bridge.y - 0.5) * -2 # Invert Y for screen coordinates
+            y = (nose_bridge.y - 0.5) * -2 
             
-            # For Z, use the distance between eyes as a depth proxy.
-            # Landmarks 33 (right outer) and 263 (left outer)
-            left_eye = face_landmarks.landmark[263]
-            right_eye = face_landmarks.landmark[33]
-            
-            eye_dist = np.sqrt(
-                (left_eye.x - right_eye.x)**2 + 
-                (left_eye.y - right_eye.y)**2 + 
-                (left_eye.z - right_eye.z)**2
-            )
-            
-            # Map eye_dist to a reasonable Z range. 
-            # When close, eye_dist is larger. 
-            # We'll use an inverse relationship or calibration later.
+            # Depth proxy
+            left_eye = face_landmarks[263]
+            right_eye = face_landmarks[33]
+            eye_dist = np.sqrt((left_eye.x - right_eye.x)**2 + (left_eye.y - right_eye.y)**2)
             z = -1 / (eye_dist + 0.0001) 
             
             self.coords = (x, y, z)
-            return self.coords
             
-        return None
+            # Draw tracked point for preview
+            h, w, _ = viz_image.shape
+            cx, cy = int(nose_bridge.x * w), int(nose_bridge.y * h)
+            cv2.circle(viz_image, (cx, cy), 5, (0, 255, 0), -1)
+            
+            return self.coords, viz_image
+            
+        return None, viz_image
 
     def release(self):
         self.cap.release()
